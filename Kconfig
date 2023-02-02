@@ -1,0 +1,14 @@
+menu "Buzzer"
+    config BUZZER_GPIO
+        int "GPIO"
+        default 45
+        help
+            GPIO number on which the "Buzzer" is connected. This is generally used
+            by the application for custom operations like toggling states, resetting to defaults, etc.
+
+    config BUZZER_RESSONANCE_FREQUENCY
+        int "Ressonance Frequency"
+        default 2048
+        help
+            Ressonance frequency.
+endmenu
