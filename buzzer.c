@@ -39,27 +39,20 @@
 
 LOG_TAG("buzzer");
 
-static TaskHandle_t      buzzer_task_handle    = NULL;
-static QueueHandle_t     buzzer_queue          = NULL;
-static SemaphoreHandle_t buzzer_semaphore      = NULL;
-static SemaphoreHandle_t buzzer_beep_semaphore = NULL;
-static bool              is_plaing             = false;
+static void buzzer_task(void* args) {
+	buzzer_config_t* buzzer_config = (buzzer_config_t*)args;
 
-static void buzzer_task(void* arg) {
-	// uint8_t _pin = *((uint8_t*)arg);
-	uint8_t _pin = CONFIG_BUZZER_GPIO;
+	if (buzzer_config->beep_semaphore == NULL) {
+		buzzer_config->beep_semaphore = xSemaphoreCreateBinary();
 
-	if (buzzer_beep_semaphore == NULL) {
-		buzzer_beep_semaphore = xSemaphoreCreateBinary();
-
-		xSemaphoreGive(buzzer_beep_semaphore);
+		xSemaphoreGive(buzzer_config->beep_semaphore);
 	}
 
 	while (true) {
 		buzzer_params_t buzzer_params;
 
-		if (xQueueReceive(buzzer_queue, &buzzer_params, portMAX_DELAY) ==
-			pdTRUE) {
+		if (xQueueReceive(buzzer_config->queue, &buzzer_params,
+						  portMAX_DELAY) == pdTRUE) {
 			if (buzzer_params.frequency > 0) {
 				ledc_timer_config_t ledc_timer = {
 					.speed_mode      = LEDC_LOW_SPEED_MODE,
@@ -69,57 +62,52 @@ static void buzzer_task(void* arg) {
 					.clk_cfg         = LEDC_AUTO_CLK,
 				};
 
-				ledc_channel_config_t ledc_channel = {
-					.speed_mode = LEDC_LOW_SPEED_MODE,
-					.channel    = LEDC_CHANNEL_0,
-					.timer_sel  = LEDC_TIMER_0,
-					.intr_type  = LEDC_INTR_DISABLE,
-					.gpio_num   = _pin,
-					.duty       = 4096,
-					.hpoint     = 0,
-				};
-
-				is_plaing = (ledc_timer_config(&ledc_timer) == ESP_OK) &&
-							(ledc_channel_config(&ledc_channel) == ESP_OK);
-			} else if (is_plaing) {
-				is_plaing =
+				buzzer_config->is_plaing =
+					(ledc_timer_config(&ledc_timer) == ESP_OK) &&
+					(ledc_channel_config(&buzzer_config->ledc_channel_config) ==
+					 ESP_OK);
+			} else if (buzzer_config->is_plaing) {
+				buzzer_config->is_plaing =
 					ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0) != ESP_OK;
 			}
 
 			if (buzzer_params.duration != 0) {
-				xSemaphoreTake(buzzer_beep_semaphore, 0);
-				xSemaphoreTake(buzzer_beep_semaphore,
+				xSemaphoreTake(buzzer_config->beep_semaphore, 0);
+				xSemaphoreTake(buzzer_config->beep_semaphore,
 							   pdMS_TO_TICKS(buzzer_params.duration));
-				xSemaphoreGive(buzzer_beep_semaphore);
+				xSemaphoreGive(buzzer_config->beep_semaphore);
 
-				if (is_plaing) {
-					is_plaing = ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0,
-										  0) != ESP_OK;
+				if (buzzer_config->is_plaing) {
+					buzzer_config->is_plaing =
+						ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0) !=
+						ESP_OK;
 				}
 			}
 		}
 	}
 }
 
-static inline void buzzer_check_semaphore() {
-	if (buzzer_semaphore == NULL) {
-		buzzer_semaphore = xSemaphoreCreateBinary();
+static inline void buzzer_check_semaphore(buzzer_config_t* buzzer_config) {
+	if (buzzer_config->semaphore == NULL) {
+		buzzer_config->semaphore = xSemaphoreCreateBinary();
 
-		xSemaphoreGive(buzzer_semaphore);
+		xSemaphoreGive(buzzer_config->semaphore);
 	}
 }
 
-bool buzzer_init(/*uint8_t _pin*/) {
+bool buzzer_init(buzzer_config_t* buzzer_config) {
 	bool ret = false;
 
-	buzzer_check_semaphore();
+	buzzer_check_semaphore(buzzer_config);
 
-	if (xSemaphoreTake(buzzer_semaphore, pdMS_TO_TICKS(1000)) == pdTRUE) {
-		if (buzzer_task_handle == NULL) {
-			if (buzzer_queue == NULL) {
-				buzzer_queue = xQueueCreate(256, sizeof(buzzer_params_t));
+	if (xSemaphoreTake(buzzer_config->semaphore, pdMS_TO_TICKS(1000)) ==
+		pdTRUE) {
+		if (buzzer_config->task_handle == NULL) {
+			if (buzzer_config->queue == NULL) {
+				buzzer_config->queue =
+					xQueueCreate(256, sizeof(buzzer_params_t));
 
-				if (buzzer_queue == NULL) {
+				if (buzzer_config->queue == NULL) {
 					ret = false;
 
 					LOGE("Fail on create queue!");
@@ -127,15 +115,15 @@ bool buzzer_init(/*uint8_t _pin*/) {
 				}
 			}
 
-			ret = xTaskCreate(buzzer_task, "buzzer_task", 4096, NULL /*&_pin*/,
-							  10, &buzzer_task_handle) == pdPASS;
+			ret = xTaskCreate(buzzer_task, "buzzer_task", 4096, buzzer_config,
+							  10, &buzzer_config->task_handle) == pdPASS;
 
 			if (!ret) {
 				LOGE("Fail on create buzzer_task!");
 			}
 
 		unlock_and_exit:
-			xSemaphoreGive(buzzer_semaphore);
+			xSemaphoreGive(buzzer_config->semaphore);
 		} else {
 			ret = true;
 		}
@@ -146,69 +134,102 @@ bool buzzer_init(/*uint8_t _pin*/) {
 	return ret;
 }
 
-void buzzer_deinit() {
-	buzzer_check_semaphore();
+void buzzer_deinit(buzzer_config_t* buzzer_config) {
+	buzzer_check_semaphore(buzzer_config);
 
-	if (xSemaphoreTake(buzzer_semaphore, pdMS_TO_TICKS(1000)) == pdTRUE) {
-		if (buzzer_task_handle != NULL) {
-			vTaskDelete(buzzer_task_handle);
+	if (xSemaphoreTake(buzzer_config->semaphore, pdMS_TO_TICKS(1000)) ==
+		pdTRUE) {
+		if (buzzer_config->task_handle != NULL) {
+			vTaskDelete(buzzer_config->task_handle);
 
-			if (buzzer_queue != NULL) {
-				vQueueDelete(buzzer_queue);
+			if (buzzer_config->queue != NULL) {
+				vQueueDelete(buzzer_config->queue);
 
-				buzzer_queue = NULL;
+				buzzer_config->queue = NULL;
 			}
 
-			if (buzzer_beep_semaphore != NULL) {
-				vSemaphoreDelete(buzzer_beep_semaphore);
+			if (buzzer_config->beep_semaphore != NULL) {
+				vSemaphoreDelete(buzzer_config->beep_semaphore);
 
-				buzzer_beep_semaphore = NULL;
+				buzzer_config->beep_semaphore = NULL;
 			}
 
-			buzzer_task_handle = NULL;
+			buzzer_config->task_handle = NULL;
 		}
 
-		xSemaphoreGive(buzzer_semaphore);
+		xSemaphoreGive(buzzer_config->semaphore);
 	}
 }
 
-size_t buzzer_play_melody(buzzer_melody_t buzzer_melody) {
+size_t buzzer_play_melody(buzzer_config_t* buzzer_config,
+						  buzzer_melody_t  buzzer_melody) {
 	size_t ret = 0;
 
 	for (int thisNote = 0; thisNote < buzzer_melody.size; thisNote++) {
 		buzzer_note_t buzzer_note = buzzer_melody.notes[thisNote];
 
-		ret += buzzer_play_note(buzzer_melody.tempo, buzzer_note);
+		ret +=
+			buzzer_play_note(buzzer_config, buzzer_melody.tempo, buzzer_note);
 	}
 
 	return ret;
 }
 
-size_t buzzer_play_note(uint16_t tempo, buzzer_note_t buzzer_note) {
+size_t buzzer_play_note(buzzer_config_t* buzzer_config, uint16_t tempo,
+						buzzer_note_t buzzer_note) {
 	buzzer_params_t buzzer_params = {
 		.frequency = buzzer_note.note,
 		.duration  = (((60000 * 4) / tempo) / buzzer_note.duration),
 	};
 
-	buzzer_play_tone(buzzer_params);
+	buzzer_play_tone(buzzer_config, buzzer_params);
 
 	return buzzer_params.duration;
 }
 
-void buzzer_play_tone(buzzer_params_t buzzer_params) {
+void buzzer_beep_start(buzzer_config_t* buzzer_config) {
+	buzzer_beep(buzzer_config, 0);
+}
+
+void buzzer_beep_stop(buzzer_config_t* buzzer_config) {
+	buzzer_params_t buzzer_params = {
+		.frequency = 0,
+		.duration  = 0,
+	};
+
+	buzzer_play_tone_now(buzzer_config, buzzer_params);
+}
+
+void buzzer_beep(buzzer_config_t* buzzer_config, uint32_t duration) {
+	buzzer_params_t buzzer_params = {
+		.frequency = buzzer_config->resonant_frequency,
+		.duration  = duration,
+	};
+
+	buzzer_play_tone_now(buzzer_config, buzzer_params);
+}
+
+void buzzer_play_tone_now(buzzer_config_t* buzzer_config,
+						  buzzer_params_t  buzzer_params) {
+	buzzer_clear_buffer(buzzer_config);
+	buzzer_play_tone(buzzer_config, buzzer_params);
+}
+
+void buzzer_play_tone(buzzer_config_t* buzzer_config,
+					  buzzer_params_t  buzzer_params) {
 	// if (buzzer_init(_pin)) {
-	if (buzzer_queue != NULL) {
-		xQueueSend(buzzer_queue, &buzzer_params, pdMS_TO_TICKS(1000));
+	if (buzzer_config->queue != NULL) {
+		xQueueSend(buzzer_config->queue, &buzzer_params, pdMS_TO_TICKS(1000));
 	}
 }
 
-void buzzer_clear_buffer() {
+void buzzer_clear_buffer(buzzer_config_t* buzzer_config) {
 	// if (buzzer_init(_pin)) {
-	if (buzzer_queue != NULL) {
-		xQueueReset(buzzer_queue);
+	if (buzzer_config->queue != NULL) {
+		xQueueReset(buzzer_config->queue);
 
-		if (is_plaing) {
-			xSemaphoreGive(buzzer_beep_semaphore);
+		if (buzzer_config->is_plaing) {
+			xSemaphoreGive(buzzer_config->beep_semaphore);
 
 			ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
 		}

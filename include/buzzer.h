@@ -24,7 +24,14 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+
+#include "driver/ledc.h"
 #include "sdkconfig.h"
 
 #define _NO   0
@@ -173,12 +180,22 @@
 #define _AS10 29834
 #define _B10  31609
 
-#define BUZZER_TONE(f, d)  \
-	buzzer_clear_buffer(); \
-	buzzer_play_tone((buzzer_params_t){f, d})
-#define BUZZER_BEEP(d)      BUZZER_TONE(_BEEP, d)
-#define BUZZER_BEEP_START() BUZZER_BEEP(_NO)
-#define BUZZER_BEEP_STOP()  BUZZER_TONE(_NO, _NO)
+#define BUZZER_CONFIG_DEFAULT()                                   \
+	{                                                             \
+		.ledc_channel_config =                                    \
+			{                                                     \
+				.speed_mode = LEDC_LOW_SPEED_MODE,                \
+				.channel    = LEDC_CHANNEL_0,                     \
+				.timer_sel  = LEDC_TIMER_0,                       \
+				.intr_type  = LEDC_INTR_DISABLE,                  \
+				.gpio_num   = CONFIG_BUZZER_GPIO,                 \
+				.duty       = 4096,                               \
+				.hpoint     = 0,                                  \
+			},                                                    \
+		.resonant_frequency = CONFIG_BUZZER_RESSONANCE_FREQUENCY, \
+		.task_handle = NULL, .queue = NULL, .semaphore = NULL,    \
+		.beep_semaphore = NULL, .is_plaing = false,               \
+	}
 
 typedef struct buzzer_params_s {
 	uint32_t frequency;
@@ -196,9 +213,27 @@ typedef struct buzzer_melody_s {
 	uint16_t       tempo;
 } buzzer_melody_t;
 
-bool   buzzer_init(/*uint8_t _pin*/);
-void   buzzer_deinit();
-size_t buzzer_play_melody(buzzer_melody_t buzzer_melody);
-size_t buzzer_play_note(uint16_t tempo, buzzer_note_t buzzer_note);
-void   buzzer_play_tone(buzzer_params_t buzzer_params);
-void   buzzer_clear_buffer();
+typedef struct buzzer_config_s {
+	ledc_channel_config_t ledc_channel_config;
+	uint32_t              resonant_frequency;
+	TaskHandle_t          task_handle;
+	QueueHandle_t         queue;
+	SemaphoreHandle_t     semaphore;
+	SemaphoreHandle_t     beep_semaphore;
+	bool                  is_plaing;
+} buzzer_config_t;
+
+bool   buzzer_init(buzzer_config_t *buzzer_config);
+void   buzzer_deinit(buzzer_config_t *buzzer_config);
+size_t buzzer_play_melody(buzzer_config_t *buzzer_config,
+						  buzzer_melody_t  buzzer_melody);
+size_t buzzer_play_note(buzzer_config_t *buzzer_config, uint16_t tempo,
+						buzzer_note_t buzzer_note);
+void   buzzer_beep_start(buzzer_config_t *buzzer_config);
+void   buzzer_beep_stop(buzzer_config_t *buzzer_config);
+void   buzzer_beep(buzzer_config_t *buzzer_config, uint32_t duration);
+void   buzzer_play_tone_now(buzzer_config_t *buzzer_config,
+							buzzer_params_t  buzzer_params);
+void   buzzer_play_tone(buzzer_config_t *buzzer_config,
+						buzzer_params_t  buzzer_params);
+void   buzzer_clear_buffer(buzzer_config_t *buzzer_config);
