@@ -133,12 +133,12 @@ bool buzzer_init(buzzer_config_t* buzzer_config) {
 			if (!ret) {
 				LOGE("Fail on create buzzer_task!");
 			}
-
-		unlock_and_exit:
-			xSemaphoreGive(buzzer_config->semaphore);
 		} else {
 			ret = true;
 		}
+
+	unlock_and_exit:
+		xSemaphoreGive(buzzer_config->semaphore);
 	} else {
 		LOGE("Fail on take semaphore!");
 	}
@@ -154,6 +154,8 @@ void buzzer_deinit(buzzer_config_t* buzzer_config) {
 		buzzer_time_marker_stop(buzzer_config);
 
 		if (buzzer_config->task_handle != NULL) {
+			buzzer_clear_buffer(buzzer_config);
+
 			vTaskDelete(buzzer_config->task_handle);
 
 			if (buzzer_config->queue != NULL) {
