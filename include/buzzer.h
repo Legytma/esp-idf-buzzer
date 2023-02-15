@@ -236,6 +236,10 @@ typedef struct buzzeer_time_marker_config_s {
 	esp_timer_handle_t      timer_handler;
 } buzzer_time_marker_config_t;
 
+typedef struct buzzer_config_s buzzer_config_t;
+
+typedef void (*buzzer_hook_callback_t)(buzzer_config_t *, buzzer_params_t);
+
 typedef struct buzzer_config_s {
 	ledc_channel_config_t       ledc_channel_config;
 	uint32_t                    resonant_frequency;
@@ -245,6 +249,7 @@ typedef struct buzzer_config_s {
 	SemaphoreHandle_t           semaphore;
 	SemaphoreHandle_t           beep_semaphore;
 	bool                        is_plaing;
+	buzzer_hook_callback_t      hook_callback;
 	void                       *priv_data;
 } buzzer_config_t;
 

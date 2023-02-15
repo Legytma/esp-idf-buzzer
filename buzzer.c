@@ -73,6 +73,10 @@ static void buzzer_task(void* args) {
 					ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0) != ESP_OK;
 			}
 
+			if (buzzer_config->hook_callback != NULL) {
+				(*buzzer_config->hook_callback)(buzzer_config, buzzer_params);
+			}
+
 			if (buzzer_params.duration != 0) {
 				xSemaphoreTake(buzzer_config->beep_semaphore, 0);
 				xSemaphoreTake(buzzer_config->beep_semaphore,
