@@ -32,6 +32,9 @@
 #include "freertos/semphr.h"
 
 #include "driver/ledc.h"
+
+#include "esp_timer.h"
+
 #include "sdkconfig.h"
 
 #define _NO   0
@@ -193,8 +196,21 @@
 				.hpoint     = 0,                                  \
 			},                                                    \
 		.resonant_frequency = CONFIG_BUZZER_RESSONANCE_FREQUENCY, \
-		.task_handle = NULL, .queue = NULL, .semaphore = NULL,    \
-		.beep_semaphore = NULL, .is_plaing = false,               \
+		.time_marker_config =                                     \
+			{                                                     \
+				.timer_config =                                   \
+					{                                             \
+						.name            = "buzzer_time_marker",  \
+						.arg             = NULL,                  \
+						.callback        = NULL,                  \
+						.dispatch_method = ESP_TIMER_TASK,        \
+					},                                            \
+				.interval_us   = 1000000,                         \
+				.duration_ms   = 100,                             \
+				.timer_handler = NULL,                            \
+			},                                                    \
+		.queue = NULL, .semaphore = NULL, .beep_semaphore = NULL, \
+		.is_plaing = false, .priv_data = NULL,                    \
 	}
 
 typedef struct buzzer_params_s {
@@ -213,14 +229,23 @@ typedef struct buzzer_melody_s {
 	uint16_t       tempo;
 } buzzer_melody_t;
 
+typedef struct buzzeer_time_marker_config_s {
+	uint64_t                interval_us;
+	uint32_t                duration_ms;
+	esp_timer_create_args_t timer_config;
+	esp_timer_handle_t      timer_handler;
+} buzzer_time_marker_config_t;
+
 typedef struct buzzer_config_s {
-	ledc_channel_config_t ledc_channel_config;
-	uint32_t              resonant_frequency;
-	TaskHandle_t          task_handle;
-	QueueHandle_t         queue;
-	SemaphoreHandle_t     semaphore;
-	SemaphoreHandle_t     beep_semaphore;
-	bool                  is_plaing;
+	ledc_channel_config_t       ledc_channel_config;
+	uint32_t                    resonant_frequency;
+	buzzer_time_marker_config_t time_marker_config;
+	TaskHandle_t                task_handle;
+	QueueHandle_t               queue;
+	SemaphoreHandle_t           semaphore;
+	SemaphoreHandle_t           beep_semaphore;
+	bool                        is_plaing;
+	void                       *priv_data;
 } buzzer_config_t;
 
 bool   buzzer_init(buzzer_config_t *buzzer_config);
@@ -232,6 +257,8 @@ size_t buzzer_play_note(buzzer_config_t *buzzer_config, uint16_t tempo,
 void   buzzer_beep_start(buzzer_config_t *buzzer_config);
 void   buzzer_beep_stop(buzzer_config_t *buzzer_config);
 void   buzzer_beep(buzzer_config_t *buzzer_config, uint32_t duration);
+void   buzzer_time_marker_start(buzzer_config_t *buzzer_config);
+void   buzzer_time_marker_stop(buzzer_config_t *buzzer_config);
 void   buzzer_play_tone_now(buzzer_config_t *buzzer_config,
 							buzzer_params_t  buzzer_params);
 void   buzzer_play_tone(buzzer_config_t *buzzer_config,

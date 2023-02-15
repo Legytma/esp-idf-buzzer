@@ -31,6 +31,8 @@
 
 #include "driver/ledc.h"
 
+#include "esp_timer.h"
+
 #include "log_utils.h"
 
 #include "sdkconfig.h"
@@ -95,6 +97,12 @@ static inline void buzzer_check_semaphore(buzzer_config_t* buzzer_config) {
 	}
 }
 
+static void buzzer_timer_handler(void* args) {
+	buzzer_config_t* buzzer_config = (buzzer_config_t*)args;
+
+	buzzer_beep(buzzer_config, buzzer_config->time_marker_config.duration_ms);
+}
+
 bool buzzer_init(buzzer_config_t* buzzer_config) {
 	bool ret = false;
 
@@ -139,6 +147,8 @@ void buzzer_deinit(buzzer_config_t* buzzer_config) {
 
 	if (xSemaphoreTake(buzzer_config->semaphore, pdMS_TO_TICKS(1000)) ==
 		pdTRUE) {
+		buzzer_time_marker_stop(buzzer_config);
+
 		if (buzzer_config->task_handle != NULL) {
 			vTaskDelete(buzzer_config->task_handle);
 
@@ -207,6 +217,45 @@ void buzzer_beep(buzzer_config_t* buzzer_config, uint32_t duration) {
 	};
 
 	buzzer_play_tone_now(buzzer_config, buzzer_params);
+}
+
+void buzzer_time_marker_start(buzzer_config_t* buzzer_config) {
+	LOG_FUN_START_V;
+	buzzer_config->time_marker_config.timer_config.arg = buzzer_config;
+	buzzer_config->time_marker_config.timer_config.callback =
+		&buzzer_timer_handler;
+
+	if (buzzer_config->time_marker_config.timer_handler == NULL) {
+		buzzer_timer_handler(buzzer_config);
+
+		LOGD("Creating time_marker...");
+		ESP_ERROR_CHECK(
+			esp_timer_create(&buzzer_config->time_marker_config.timer_config,
+							 &buzzer_config->time_marker_config.timer_handler));
+		ESP_ERROR_CHECK(esp_timer_start_periodic(
+			buzzer_config->time_marker_config.timer_handler,
+			buzzer_config->time_marker_config.interval_us));
+	} else {
+		LOGD("Restarting time_marker...");
+		ESP_ERROR_CHECK(
+			esp_timer_restart(buzzer_config->time_marker_config.timer_handler,
+							  buzzer_config->time_marker_config.interval_us));
+	}
+	LOG_FUN_END_V;
+}
+
+void buzzer_time_marker_stop(buzzer_config_t* buzzer_config) {
+	LOG_FUN_START_V;
+	if (buzzer_config->time_marker_config.timer_handler != NULL) {
+		LOGD("Destroing time_marker...");
+		ESP_ERROR_CHECK(
+			esp_timer_stop(buzzer_config->time_marker_config.timer_handler));
+		ESP_ERROR_CHECK(
+			esp_timer_delete(buzzer_config->time_marker_config.timer_handler));
+
+		buzzer_config->time_marker_config.timer_handler = NULL;
+	}
+	LOG_FUN_END_V;
 }
 
 void buzzer_play_tone_now(buzzer_config_t* buzzer_config,
