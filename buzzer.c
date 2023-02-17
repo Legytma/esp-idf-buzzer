@@ -232,8 +232,6 @@ void buzzer_time_marker_start(buzzer_config_t* buzzer_config) {
 		&buzzer_timer_handler;
 
 	if (buzzer_config->time_marker_config.timer_handler == NULL) {
-		buzzer_timer_handler(buzzer_config);
-
 		LOGD("Creating time_marker...");
 		ESP_ERROR_CHECK(
 			esp_timer_create(&buzzer_config->time_marker_config.timer_config,
